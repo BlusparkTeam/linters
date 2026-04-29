@@ -41,19 +41,20 @@ func main() {
 						log.SetLevel(log.DebugLevel)
 					}
 
-					err := analyse.Lint()
-					if err == nil {
-						// at the bottom of the screen
-						style := lipgloss.NewStyle().Background(lipgloss.Color("#00FF00")).Foreground(lipgloss.Color("#000000")).AlignVertical(lipgloss.Bottom).MarginTop(2)
-						fmt.Fprintf(os.Stdout, "%s\n", style.Render("Success"))
-					}
+				err := analyse.Lint()
+				if err == nil {
+					// at the bottom of the screen
+					style := lipgloss.NewStyle().Background(lipgloss.Color("#00FF00")).Foreground(lipgloss.Color("#000000")).AlignVertical(lipgloss.Bottom).MarginTop(2)
+					fmt.Fprintf(os.Stdout, "%s\n", style.Render("Success"))
+				}
 
-					if err != nil {
-						os.Exit(1)
-					}
+				analyse.ListReports()
 
-					analyse.ListReports()
-					return err
+				if err != nil {
+					os.Exit(1)
+				}
+
+				return err
 				},
 			},
 			{

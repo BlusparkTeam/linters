@@ -1,13 +1,53 @@
 package rules
 
-import "github.com/Consoneo/linters/src/config"
+import (
+	"bytes"
+	"fmt"
+	"os/exec"
+
+	"github.com/Consoneo/linters/src/config"
+)
 
 type Psr1 struct {
 }
 
-func (o *Psr1) Execute(config config.Config) (string, error) {
-	command := "docker run --rm -v " + config.Path + ":/code ghcr.io/php-cs-fixer/php-cs-fixer:${FIXER_VERSION:-3-php" + config.Version + "} check --rules=@PSR1 ."
-	return ExecuteCommandAndExpectNoResultToBeCorrect(command)
+func (o *Psr1) ExecuteDetailed(c config.Config) ([]LintResult, error) {
+	cmd := exec.Command(
+		"docker", "run", "--rm",
+		"-v", c.Path+":/app",
+		"ghcr.io/php-cs-fixer/php-cs-fixer:3-php"+c.Version,
+		"fix", "/app",
+		"--rules=@PSR1",
+		"--dry-run",
+		"--format=json",
+		"--diff",
+		"--using-cache=no",
+	)
+
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	err := cmd.Run()
+
+	if err == nil {
+		return []LintResult{}, nil
+	}
+
+	results := parseFixerJsonOutput(stdout.Bytes(), stderr.Bytes(), o.Slug(), "PSR-1", c.Path)
+
+	if len(results) > 0 {
+		return results, fmt.Errorf("PSR-1 violations found")
+	}
+
+	return results, nil
+}
+
+func (o *Psr1) Execute(c config.Config) (string, error) {
+	results, err := o.ExecuteDetailed(c)
+	if err != nil {
+		return fmt.Sprintf("%d violations", len(results)), err
+	}
+	return "", nil
 }
 
 func (o *Psr1) Name() string {
