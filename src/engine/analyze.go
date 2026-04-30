@@ -17,6 +17,8 @@ import (
 
 type Analyse struct{}
 
+type LintResult = rules.LintResult
+
 func (o *Analyse) Lint() error {
 	return o.executeLint("lint")
 }
@@ -78,7 +80,7 @@ func (o *Analyse) executeLint(lintType string) error {
 
 	// Start channels
 	var wg sync.WaitGroup
-	ch := make(chan int)
+	ch := make(chan []LintResult)
 
 	languages := []string{"php", "javascript", "css", "html"}
 
@@ -152,14 +154,33 @@ func (o *Analyse) executeLint(lintType string) error {
 							executionConfig.Path += "/" + dir.(string)
 						}
 
+						var results []LintResult
 						var err error
+
 						if lintType == "lint" {
-							_, err = availableRule.Execute(executionConfig)
+							// Use DetailedRule if available for rich output
+							if detailedRule, ok := availableRule.(rules.DetailedRule); ok {
+								results, err = detailedRule.ExecuteDetailed(executionConfig)
+							} else {
+								// Fallback for simple rules
+								_, err = availableRule.Execute(executionConfig)
+								if err != nil {
+									results = append(results, LintResult{
+										Rule:     availableRule.Slug(),
+										File:     executionConfig.Path,
+										Line:     0,
+										Message:  err.Error(),
+										Severity: "error",
+									})
+								}
+							}
 						} else {
 							if availableRule.CanFix() {
 								_, err = availableRule.Fix(executionConfig)
 							} else {
 								spinner.UpdateMessage("skipped: " + availableRule.Name())
+								ch <- []LintResult{}
+								return
 							}
 						}
 
@@ -169,11 +190,7 @@ func (o *Analyse) executeLint(lintType string) error {
 							spinner.Complete()
 						}
 
-						result := 0
-						if err != nil {
-							result = 1
-						}
-						ch <- result
+						ch <- results
 					}(rule)
 				}
 			}
@@ -196,11 +213,17 @@ func (o *Analyse) executeLint(lintType string) error {
 							spinner.Complete()
 						}
 
-						result := 0
+						var results []LintResult
 						if err != nil {
-							result = 1
+							results = append(results, LintResult{
+								Rule:     "custom-command",
+								File:     command.(string),
+								Line:     0,
+								Message:  err.Error(),
+								Severity: "error",
+							})
 						}
-						ch <- result
+						ch <- results
 					}(command)
 				}
 			}
@@ -213,17 +236,67 @@ func (o *Analyse) executeLint(lintType string) error {
 		sm.Stop()
 	}()
 
-	// get the sums of all the results
-	var sum int
-	for r := range ch {
-		sum += r
+	// Collect all results
+	allResults := []LintResult{}
+	for results := range ch {
+		allResults = append(allResults, results...)
 	}
 
-	if sum > 0 {
+	if len(allResults) > 0 {
+		o.displaySummary(allResults)
 		return errors.New("linting failed")
 	}
 
 	return nil
+}
+
+func (o *Analyse) displaySummary(allResults []LintResult) {
+	style := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("196")).
+		Bold(true).
+		MarginTop(1)
+
+	fmt.Println(style.Render("\n✗ Linting Violations"))
+
+	// Group by file
+	fileViolations := make(map[string][]LintResult)
+	for _, r := range allResults {
+		fileViolations[r.File] = append(fileViolations[r.File], r)
+	}
+
+	// Display per file
+	for file, violations := range fileViolations {
+		fileStyle := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("99")).
+			Bold(true).
+			MarginTop(1)
+
+		fmt.Printf("\n%s (%d issues)\n", fileStyle.Render(file), len(violations))
+
+		for _, v := range violations {
+			icon := "⚠"
+			color := "214"
+			if v.Severity == "error" {
+				icon = "✗"
+				color = "196"
+			}
+
+			location := ""
+			if v.Line > 0 {
+				location = fmt.Sprintf(":%d", v.Line)
+			}
+
+			msgStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(color))
+			fmt.Println(msgStyle.Render(fmt.Sprintf("  %s Line%s [%s] %s", icon, location, v.Rule, v.Message)))
+		}
+	}
+
+	// Summary line
+	summaryStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("196")).
+		Bold(true).
+		MarginTop(1)
+	fmt.Println(summaryStyle.Render(fmt.Sprintf("\n✗ %d violation(s) found", len(allResults))))
 }
 
 func (o *Analyse) InitConfig() {

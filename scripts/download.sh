@@ -4,7 +4,7 @@
 # @from https://github.com/Halleck45/ast-metrics/blob/main/scripts/download.sh
 #
 
-repository="BlusparkTeam/linters"
+repository="Consoneo/linters"
 binary_name="linters"
 
 # Function to get the version of the latest release
